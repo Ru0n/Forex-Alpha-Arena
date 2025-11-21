@@ -12,12 +12,10 @@
  * Data source: /api/account/asset-curve with environment parameter (testnet/mainnet)
  * Backend field: total_assets (NOT total_equity - field name fixed in v0.5.1)
  */
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import {
-  LineChart,
   Line,
   Area,
-  AreaChart,
   ComposedChart,
   ReferenceLine,
   XAxis,
@@ -41,14 +39,12 @@ interface HyperliquidAssetData {
 }
 
 interface HyperliquidAssetChartProps {
-  accountId: number
   refreshTrigger?: number
   environment?: HyperliquidEnvironment
   selectedAccount?: number | 'all'
 }
 
 export default function HyperliquidAssetChart({
-  accountId,
   refreshTrigger,
   environment,
   selectedAccount,
@@ -56,7 +52,7 @@ export default function HyperliquidAssetChart({
   const [data, setData] = useState<HyperliquidAssetData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [logoPulseMap, setLogoPulseMap] = useState<Map<number, number>>(new Map())
+
 
   // Fetch Hyperliquid asset curve data (5-minute bucketed)
   const fetchData = useCallback(async () => {
@@ -161,14 +157,22 @@ export default function HyperliquidAssetChart({
         if (chartData.length === 0) return null
 
         // Find the last data point where this account has a value
-        const lastIndexWithValue = chartData.findLastIndex(point => typeof point[account.username] === 'number')
+        // Replacement for findLastIndex for better compatibility
+        let lastIndexWithValue = -1;
+        for (let i = chartData.length - 1; i >= 0; i--) {
+          const point = chartData[i];
+          if (point && typeof point[account.username] === 'number') {
+            lastIndexWithValue = i;
+            break;
+          }
+        }
+
         if (lastIndexWithValue === -1 || index !== lastIndexWithValue) return null
 
         const value = payload[account.username]
         if (typeof value !== 'number') return null
 
         const color = account.logo?.color || getModelColor(account.username)
-        const pulseIteration = logoPulseMap.get(account.account_id) ?? 0
         const size = 32
         const logoX = cx - size / 2
         const logoY = cy - size / 2
@@ -177,15 +181,6 @@ export default function HyperliquidAssetChart({
 
         return (
           <g>
-            {pulseIteration > 0 && (
-              <circle
-                cx={cx}
-                cy={cy}
-                r={size / 2}
-                fill={color}
-                className="pointer-events-none animate-ping-logo"
-              />
-            )}
             <foreignObject
               x={logoX}
               y={logoY}
@@ -240,7 +235,7 @@ export default function HyperliquidAssetChart({
           </g>
         )
       },
-    [chartData, logoPulseMap]
+    [chartData]
   )
 
   if (loading && data.length === 0) {
@@ -283,7 +278,7 @@ export default function HyperliquidAssetChart({
               stroke="#888"
               fontSize={11}
               interval={Math.ceil(chartData.length / 6)}
-              tickFormatter={(value) => {
+              tickFormatter={(value: string) => {
                 if (!value) return ''
                 const [datePart, timePart] = value.split(' ')
                 return `${datePart}\n${timePart}`
@@ -293,7 +288,7 @@ export default function HyperliquidAssetChart({
               stroke="#888"
               fontSize={11}
               domain={yAxisDomain}
-              tickFormatter={(value) => `$${Number(value).toLocaleString()}`}
+              tickFormatter={(value: number) => `$${Number(value).toLocaleString()}`}
             />
             <Tooltip
               contentStyle={{
@@ -323,17 +318,21 @@ export default function HyperliquidAssetChart({
 
             {accountsData.map(account => {
               const color = account.logo?.color || getModelColor(account.username)
+              const isBenchmark = account.username === 'BTC Buy & Hold'
+
               return (
                 <Line
                   key={account.account_id}
                   type="monotone"
                   dataKey={account.username}
                   stroke={color}
-                  strokeWidth={2.5}
+                  strokeWidth={isBenchmark ? 2 : 2.5}
+                  strokeDasharray={isBenchmark ? "5 5" : undefined}
                   dot={false}
                   activeDot={{ r: 6, fill: color }}
                   connectNulls={false}
                   isAnimationActive={false}
+                  opacity={isBenchmark ? 0.8 : 1}
                 />
               )
             })}
@@ -346,7 +345,7 @@ export default function HyperliquidAssetChart({
                 dataKey={account.username}
                 stroke="transparent"
                 strokeWidth={0}
-                dot={renderTerminalDot(account)}
+                dot={renderTerminalDot(account) as any}
                 activeDot={false}
                 isAnimationActive={false}
               />
