@@ -62,9 +62,6 @@ class Account(Base):
     max_leverage = Column(Integer, nullable=True, default=3)  # Maximum allowed leverage
     default_leverage = Column(Integer, nullable=True, default=1)  # Default leverage for orders
 
-    # Premium Features Configuration
-    sampling_depth = Column(Integer, nullable=False, default=10)  # Sampling pool depth (10 for free, 10-60 for premium)
-
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
         TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
@@ -221,11 +218,13 @@ class CryptoKline(Base):
     __tablename__ = "crypto_klines"
 
     id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, default="hyperliquid", index=True)
     symbol = Column(String(20), nullable=False, index=True)
     market = Column(String(10), nullable=False, default="CRYPTO")
     period = Column(String(10), nullable=False)  # 1m, 5m, 15m, 30m, 1h, 1d
     timestamp = Column(Integer, nullable=False, index=True)
     datetime_str = Column(String(50), nullable=False)
+    environment = Column(String(20), nullable=False, default="mainnet", index=True)  # testnet or mainnet
     open_price = Column(DECIMAL(18, 6), nullable=True)
     high_price = Column(DECIMAL(18, 6), nullable=True)
     low_price = Column(DECIMAL(18, 6), nullable=True)
@@ -236,7 +235,7 @@ class CryptoKline(Base):
     percent = Column(DECIMAL(10, 4), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
 
-    __table_args__ = (UniqueConstraint('symbol', 'market', 'period', 'timestamp'),)
+    __table_args__ = (UniqueConstraint('exchange', 'symbol', 'market', 'period', 'timestamp', 'environment'),)
 
 
 class CryptoPriceTick(Base):
@@ -345,11 +344,17 @@ class PromptTemplate(Base):
     __tablename__ = "prompt_templates"
 
     id = Column(Integer, primary_key=True, index=True)
-    key = Column(String(100), unique=True, nullable=False)
+    key = Column(String(100), nullable=False, index=True)  # Removed unique constraint to allow copies
     name = Column(String(200), nullable=False)
     description = Column(String(500), nullable=True)
     template_text = Column(Text, nullable=False)
     system_template_text = Column(Text, nullable=False)
+
+    # User-level template support
+    is_system = Column(String(10), nullable=False, default="false")  # System templates cannot be deleted
+    is_deleted = Column(String(10), nullable=False, default="false")  # Soft delete
+    created_by = Column(String(100), nullable=False, default="system")  # Creator identifier
+
     updated_by = Column(String(100), nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
@@ -491,6 +496,102 @@ class HyperliquidExchangeAction(Base):
     error_message = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
 
+    account = relationship("Account")
+
+
+class PerpFunding(Base):
+    """Store perpetual contract funding rate data from multiple exchanges"""
+    __tablename__ = "perp_funding"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    timestamp = Column(Integer, nullable=False, index=True)
+    funding_rate = Column(DECIMAL(18, 8), nullable=False)
+    mark_price = Column(DECIMAL(18, 6), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+
+    __table_args__ = (UniqueConstraint('exchange', 'symbol', 'timestamp'),)
+
+
+class PriceSample(Base):
+    """Store price sampling data for persistent sampling pools"""
+    __tablename__ = "price_samples"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    price = Column(DECIMAL(18, 8), nullable=False)
+    sample_time = Column(TIMESTAMP, nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+
+    # Relationships
+    account = relationship("Account")
+
+
+class UserExchangeConfig(Base):
+    """Store user exchange selection preferences"""
+    __tablename__ = "user_exchange_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    selected_exchange = Column(String(20), nullable=False, default="hyperliquid")
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+    # Relationships
+    user = relationship("User")
+
+
+class KlineCollectionTask(Base):
+    """Store K-line data collection task status"""
+    __tablename__ = "kline_collection_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    exchange = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    start_time = Column(TIMESTAMP, nullable=False)
+    end_time = Column(TIMESTAMP, nullable=False)
+    period = Column(String(10), nullable=False, default="1m")
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    progress = Column(Integer, nullable=False, default=0)
+    total_records = Column(Integer, default=0)
+    collected_records = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
+    updated_at = Column(
+        TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp()
+    )
+
+
+class KlineAIAnalysisLog(Base):
+    """Store K-line AI analysis logs for chart insights"""
+    __tablename__ = "kline_ai_analysis_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=False, index=True)
+
+    # Analysis context
+    symbol = Column(String(20), nullable=False, index=True)
+    period = Column(String(10), nullable=False)  # K-line period (1m, 5m, 1h, etc.)
+    user_message = Column(Text, nullable=True)  # User's custom question
+
+    # AI model info
+    model_used = Column(String(100), nullable=False)
+
+    # Snapshots
+    prompt_snapshot = Column(Text, nullable=True)  # Full prompt sent to AI
+    analysis_result = Column(Text, nullable=True)  # AI's analysis response (Markdown)
+
+    # Metadata
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp(), index=True)
+
+    # Relationships
+    user = relationship("User")
     account = relationship("Account")
 
 

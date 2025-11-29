@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { getModelLogo } from './logoAssets'
 import FlipNumber from './FlipNumber'
 import HighlightWrapper from './HighlightWrapper'
+import { formatDateTime } from '@/lib/dateTime'
 
 interface AlphaArenaFeedProps {
   refreshKey?: number
@@ -33,17 +34,8 @@ const MODEL_CHAT_LIMIT = 60
 
 type CacheKey = string
 
-function formatDate(value?: string | null) {
-  if (!value) return 'N/A'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+// Use formatDateTime from @/lib/dateTime with 'short' style for compact display
+const formatDate = (value?: string | null) => formatDateTime(value, { style: 'short' })
 
 function formatPercent(value?: number | null) {
   if (value === undefined || value === null) return '—'
@@ -77,6 +69,7 @@ export default function AlphaArenaFeed({
   )
   const [expandedChat, setExpandedChat] = useState<number | null>(null)
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
+  const [copiedSections, setCopiedSections] = useState<Record<string, boolean>>({})
   const [manualRefreshKey, setManualRefreshKey] = useState(0)
   const [loadingTrades, setLoadingTrades] = useState(false)
   const [loadingModelChat, setLoadingModelChat] = useState(false)
@@ -475,6 +468,22 @@ export default function AlphaArenaFeed({
   const isSectionExpanded = (entryId: number, section: 'prompt' | 'reasoning' | 'decision') =>
     !!expandedSections[`${entryId}-${section}`]
 
+  const handleCopySection = async (entryId: number, section: 'prompt' | 'reasoning' | 'decision', content: string) => {
+    const key = `${entryId}-${section}`
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopiedSections((prev) => ({ ...prev, [key]: true }))
+      setTimeout(() => {
+        setCopiedSections((prev) => ({ ...prev, [key]: false }))
+      }, 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
+  const isSectionCopied = (entryId: number, section: 'prompt' | 'reasoning' | 'decision') =>
+    !!copiedSections[`${entryId}-${section}`]
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
@@ -693,6 +702,8 @@ export default function AlphaArenaFeed({
                             }].map(({ label, section, content, empty }) => {
                               const open = isSectionExpanded(entry.id, section)
                               const displayContent = content?.trim()
+                              const copied = isSectionCopied(entry.id, section)
+                              
                               return (
                                 <div key={section} className="border border-border/60 rounded-md bg-background/60">
                                   <button
@@ -715,9 +726,30 @@ export default function AlphaArenaFeed({
                                       onClick={(event) => event.stopPropagation()}
                                     >
                                       {displayContent ? (
-                                        <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground/90">
-                                          {displayContent}
-                                        </pre>
+                                        <>
+                                          <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground/90">
+                                            {displayContent}
+                                          </pre>
+                                          <div className="mt-3 flex justify-end">
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                if (displayContent) {
+                                                  handleCopySection(entry.id, section, displayContent)
+                                                }
+                                              }}
+                                              className={`px-3 py-1.5 text-[10px] font-medium rounded transition-all ${
+                                                copied 
+                                                  ? 'bg-emerald-500/20 text-emerald-600 border border-emerald-500/30' 
+                                                  : 'bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground border border-border/60'
+                                              }`}
+                                            >
+                                              {copied ? '✓ Copied' : 'Copy'}
+                                            </button>
+                                          </div>
+                                        </>
+
                                       ) : (
                                         <span className="text-muted-foreground/70">{empty}</span>
                                       )}
